@@ -45,7 +45,10 @@ class DatasetSplitterTab(tk.Frame):
                   font=("Arial", 12, "bold"), command=self.run_split).pack(pady=10, ipadx=30)
 
     def browse_src(self):
-        directory = filedialog.askdirectory()
+        last_dir = self.src_dir_var.get() if self.src_dir_var.get() else os.path.abspath("label-studio")
+        if not os.path.exists(last_dir): last_dir = os.path.abspath("label-studio")
+        
+        directory = filedialog.askdirectory(initialdir=last_dir)
         if directory:
             self.src_dir_var.set(directory)
             self.config_manager.set("dataset_splitter", "src_dir", directory)
@@ -123,7 +126,7 @@ class DatasetSplitterTab(tk.Frame):
                     shutil.copy(label_p, os.path.join(output_root, "labels", split, label_name))
 
         yaml_data = {
-            'path': os.path.abspath(output_root),
+            'path': output_root,  # 使用相对路径
             'train': 'images/train',
             'val': 'images/val',
             'test': 'images/test',

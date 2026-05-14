@@ -18,6 +18,7 @@ DEFAULT_CONFIG = {
         "model_path": "yolo11n.pt",
         "epochs": 100,
         "batch": 8,
+        "workers": 0,
         "device": "0",
         "project_name": "My_YOLO_Project"
     },

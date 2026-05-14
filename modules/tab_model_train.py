@@ -74,8 +74,9 @@ class ModelTrainTab(tk.Frame):
         self.device = tk.StringVar(value=self.config_manager.get("yolo_train", "device"))
         tk.Entry(params_frame, textvariable=self.device, width=10).grid(row=1, column=1, padx=5, pady=5)
 
-        # 模型融合入口预留
-        tk.Button(params_frame, text="🧩 模型融合(开发中)", state="disabled").grid(row=1, column=2, columnspan=2, padx=5, pady=5)
+        tk.Label(params_frame, text="Workers:").grid(row=1, column=2, sticky="e")
+        self.workers = tk.StringVar(value=str(self.config_manager.get("yolo_train", "workers")))
+        tk.Entry(params_frame, textvariable=self.workers, width=10).grid(row=1, column=3, padx=5, pady=5)
 
         # 4. 控制区域
         ctrl_frame = tk.Frame(top_frame)
@@ -94,13 +95,25 @@ class ModelTrainTab(tk.Frame):
         self.log_text.pack(fill="both", expand=True, padx=20, pady=5)
 
     def browse_yaml(self):
-        path = filedialog.askopenfilename(filetypes=[("YAML files", "*.yaml")])
+        last_dir = os.path.dirname(self.yaml_path.get()) if self.yaml_path.get() else os.path.abspath("dataset")
+        if not os.path.exists(last_dir): last_dir = os.path.abspath("dataset")
+        
+        path = filedialog.askopenfilename(
+            initialdir=last_dir,
+            filetypes=[("YAML files", "*.yaml")]
+        )
         if path:
             self.yaml_path.set(path)
             self.config_manager.set("yolo_train", "yaml_path", path)
 
     def browse_model(self):
-        path = filedialog.askopenfilename(filetypes=[("PT files", "*.pt")])
+        last_dir = os.path.dirname(self.model_path.get()) if self.model_path.get() else os.path.abspath("models")
+        if not os.path.exists(last_dir): last_dir = "."
+        
+        path = filedialog.askopenfilename(
+            initialdir=last_dir,
+            filetypes=[("PT files", "*.pt")]
+        )
         if path:
             self.model_path.set(path)
             self.config_manager.set("yolo_train", "model_path", path)
@@ -135,6 +148,7 @@ class ModelTrainTab(tk.Frame):
         self.config_manager.set("yolo_train", "epochs", int(self.epochs.get()))
         self.config_manager.set("yolo_train", "batch", int(self.batch.get()))
         self.config_manager.set("yolo_train", "device", self.device.get())
+        self.config_manager.set("yolo_train", "workers", int(self.workers.get()))
 
         self.start_btn.config(state="disabled", text="训练中...")
         self.log_text.delete(1.0, tk.END)
@@ -155,7 +169,7 @@ class ModelTrainTab(tk.Frame):
             # 1. 动态命名逻辑
             tags = self.get_dataset_info(yaml_p)
             tag_name_clean = self.clean_tags(tags)
-            date_str = datetime.datetime.now().strftime("%Y%m%d")
+            date_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             
             project_dir_name = f"yolo_project_{date_str}_{tag_name_clean}"
             project_root = self.config_manager.get("yolo_train", "project_root") or "project"
@@ -181,6 +195,7 @@ class ModelTrainTab(tk.Frame):
                 data=yaml_p,
                 epochs=int(self.epochs.get()),
                 batch=int(self.batch.get()),
+                workers=int(self.workers.get()),
                 device=self.device.get(),
                 project=project_root,
                 name=project_dir_name,
