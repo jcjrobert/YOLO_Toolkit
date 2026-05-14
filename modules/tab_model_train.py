@@ -78,6 +78,10 @@ class ModelTrainTab(tk.Frame):
         self.workers = tk.StringVar(value=str(self.config_manager.get("yolo_train", "workers")))
         tk.Entry(params_frame, textvariable=self.workers, width=10).grid(row=1, column=3, padx=5, pady=5)
 
+        # 恢复训练勾选框
+        self.resume_train = tk.BooleanVar(value=False)
+        tk.Checkbutton(params_frame, text="恢复训练 (从 last.pt 断点续跑)", variable=self.resume_train).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+
         # 4. 控制区域
         ctrl_frame = tk.Frame(top_frame)
         ctrl_frame.pack(fill="x", pady=10)
@@ -165,43 +169,77 @@ class ModelTrainTab(tk.Frame):
         try:
             yaml_p = self.yaml_path.get()
             model_p = self.model_path.get()
+            is_resume = self.resume_train.get()
             
             # 1. 动态命名逻辑
             tags = self.get_dataset_info(yaml_p)
             tag_name_clean = self.clean_tags(tags)
             date_str = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
             
-            project_dir_name = f"yolo_project_{date_str}_{tag_name_clean}"
             project_root = self.config_manager.get("yolo_train", "project_root") or "project"
-            save_dir = os.path.join(project_root, project_dir_name)
+
+            if is_resume:
+                # 恢复模式逻辑
+                if not model_p.endswith('last.pt'):
+                    print("\n⚠️ 警告: 恢复训练建议选择 'last.pt' 文件。")
+                
+                # 在恢复模式下，项目名通常从路径中提取，但 YOLO 的 resume=True 
+                # 会自动处理大部分事情。我们只需要确保加载了正确的模型。
+                project_dir_name = None # 后面会判断
+                # 尝试从路径中解析项目名以便后续归档
+                path_parts = os.path.normpath(model_p).split(os.sep)
+                if len(path_parts) >= 3 and path_parts[-2] == 'weights':
+                    project_dir_name = path_parts[-3]
+                    save_dir = os.path.dirname(os.path.dirname(model_p))
+                else:
+                    project_dir_name = "resumed_project"
+                    save_dir = os.path.dirname(os.path.dirname(model_p))
+            else:
+                # 普通训练模式
+                project_dir_name = f"yolo_project_{date_str}_{tag_name_clean}"
+                save_dir = os.path.join(project_root, project_dir_name)
             
             # 2. 初始化日志
             os.makedirs("logs", exist_ok=True)
-            log_file_path = os.path.join("logs", f"train_{date_str}_{tag_name_clean}.log")
+            log_filename = f"train_{date_str}_{tag_name_clean}.log" if not is_resume else f"resume_{date_str}.log"
+            log_file_path = os.path.join("logs", log_filename)
             
             logger = TextLogger(self.log_text, log_file_path)
             sys.stdout = logger
             sys.stderr = logger
             
             self.status_label.config(text="状态: 初始化模型...", fg="orange")
-            print(f"--- 训练开始: {datetime.datetime.now()} ---")
-            print(f"数据集: {yaml_p}")
-            print(f"标签: {tags}")
+            print(f"--- {'恢复训练' if is_resume else '训练开始'}: {datetime.datetime.now()} ---")
+            if not is_resume:
+                print(f"数据集: {yaml_p}")
+                print(f"标签: {tags}")
+            print(f"权重文件: {model_p}")
             print(f"保存目录: {save_dir}")
             
             # 3. 执行训练
             model = YOLO(model_p)
-            model.train(
-                data=yaml_p,
-                epochs=int(self.epochs.get()),
-                batch=int(self.batch.get()),
-                workers=int(self.workers.get()),
-                device=self.device.get(),
-                project=project_root,
-                name=project_dir_name,
-                exist_ok=True,
-                amp=True
-            )
+            
+            train_args = {
+                "data": yaml_p,
+                "epochs": int(self.epochs.get()),
+                "batch": int(self.batch.get()),
+                "workers": int(self.workers.get()),
+                "device": self.device.get(),
+                "amp": True,
+                "exist_ok": True
+            }
+            
+            if is_resume:
+                # 恢复模式下只传 resume=True，其他参数通常从 last.pt 对应的 args.yaml 加载
+                # 但允许通过命令行覆盖部分参数
+                model.train(resume=True)
+            else:
+                # 普通模式
+                model.train(
+                    project=project_root,
+                    name=project_dir_name,
+                    **train_args
+                )
             
             # 4. 后处理：模型复制与归档
             self.status_label.config(text="状态: 归档模型中...", fg="blue")
