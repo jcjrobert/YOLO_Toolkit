@@ -1,6 +1,7 @@
 import os
 import random
 import shutil
+import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox
 import yaml
@@ -76,7 +77,21 @@ class DatasetSplitterTab(tk.Frame):
             messagebox.showerror("错误", "未找到 images 或 labels 目录")
             return
 
-        output_root = os.path.join(src_path, "YOLO_Dataset")
+        # 获取标签名并构造文件夹名
+        class_names = []
+        if os.path.exists(classes_file):
+            with open(classes_file, 'r', encoding='utf-8') as f:
+                class_names = [line.strip() for line in f.readlines() if line.strip()]
+        
+        tags_str = "_".join(class_names) if class_names else "Dataset"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+        dir_name = f"{tags_str}_{timestamp}"
+        
+        # 导出到项目根目录下的 dataset 文件夹
+        # 注意：此处假设项目根目录是 YOLO_Toolkit 的父目录，或者是根据当前工作目录确定
+        # 我们使用相对路径 'dataset' 即可，它会相对于运行 main.py 时的 cwd
+        output_root = os.path.join("dataset", dir_name)
+        
         for split in ['train', 'val', 'test']:
             os.makedirs(os.path.join(output_root, "images", split), exist_ok=True)
             os.makedirs(os.path.join(output_root, "labels", split), exist_ok=True)
@@ -107,11 +122,6 @@ class DatasetSplitterTab(tk.Frame):
                 if os.path.exists(label_p):
                     shutil.copy(label_p, os.path.join(output_root, "labels", split, label_name))
 
-        class_names = []
-        if os.path.exists(classes_file):
-            with open(classes_file, 'r', encoding='utf-8') as f:
-                class_names = [line.strip() for line in f.readlines() if line.strip()]
-        
         yaml_data = {
             'path': os.path.abspath(output_root),
             'train': 'images/train',
