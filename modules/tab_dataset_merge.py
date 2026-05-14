@@ -83,64 +83,100 @@ class DatasetMergerTab(tk.Frame):
             return
         
         try:
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_root = os.path.join("dataset", f"Merged_Project_{timestamp}")
-            os.makedirs(output_root, exist_ok=True)
+            self.log("--- 开始合并任务 ---")
             
-            merged_images_dir = os.path.join(output_root, "images")
-            merged_labels_dir = os.path.join(output_root, "labels")
+            # 1. 预读所有数据集，确定类别和输出目录名
+            dataset_info = []
+            unique_classes = []
             
-            os.makedirs(os.path.join(merged_images_dir, "train"), exist_ok=True)
-            os.makedirs(os.path.join(merged_labels_dir, "train"), exist_ok=True)
-            
-            all_names = []
-            id_offset = 0
-            
-            self.log(f"--- 开始合并任务: {timestamp} ---")
-            
-            for idx, yaml_path in enumerate(self.dataset_list):
+            for yaml_path in self.dataset_list:
                 with open(yaml_path, 'r', encoding='utf-8') as f:
                     data = yaml.safe_load(f)
                 
                 names = data.get('names', [])
                 if isinstance(names, dict):
-                    names = list(names.values())
+                    names = [names[i] for i in sorted(names.keys())]
                 
-                self.log(f"处理数据集 {idx+1}: {os.path.basename(yaml_path)} (类别数: {len(names)})")
+                dataset_info.append({
+                    'path': yaml_path,
+                    'data': data,
+                    'names': names,
+                    'root': os.path.dirname(yaml_path)
+                })
                 
-                # 确定当前数据集的根目录
-                ds_root = os.path.dirname(yaml_path)
+                for name in names:
+                    if name not in unique_classes:
+                        unique_classes.append(name)
+            
+            # 2. 生成文件夹名称: [类别1]_[类别2]_[时间戳] (YYYYMMDDHHmmss)
+            timestamp = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+            classes_str = "_".join(unique_classes)
+            folder_name = f"{classes_str}_{timestamp}"
+            output_root = os.path.join("dataset", folder_name)
+            
+            os.makedirs(output_root, exist_ok=True)
+            self.log(f"创建输出目录: {output_root}")
+
+            # 3. 执行合并
+            merged_names = []
+            id_offset = 0
+            subsets = ['train', 'val', 'test']
+            
+            for idx, info in enumerate(dataset_info):
+                yaml_path = info['path']
+                data = info['data']
+                names = info['names']
+                ds_root = info['root']
                 
-                # 处理训练集文件 (为了简化，这里只演示 train，val 可类比)
-                train_subpath = data.get('train', 'train/images')
-                # 常见结构可能是 images/train 或 train/images
-                # 我们假设标准 yolo 结构
-                src_img_dir = os.path.join(ds_root, train_subpath) if not os.path.isabs(train_subpath) else train_subpath
+                self.log(f"正在处理数据集 ({idx+1}/{len(dataset_info)}): {os.path.basename(yaml_path)}")
                 
-                if not os.path.exists(src_img_dir):
-                    # 尝试寻找兄弟目录
-                    src_img_dir = os.path.join(ds_root, "images", "train")
-                
-                if os.path.exists(src_img_dir):
+                for subset in subsets:
+                    # 获取子集路径 (优先从 yaml 读取)
+                    subset_path = data.get(subset)
+                    if not subset_path:
+                        # 尝试猜测默认路径
+                        possible_paths = [
+                            os.path.join("images", subset),
+                            os.path.join(subset, "images"),
+                            subset
+                        ]
+                        for p in possible_paths:
+                            full_p = os.path.join(ds_root, p)
+                            if os.path.exists(full_p):
+                                subset_path = p
+                                break
+                    
+                    if not subset_path:
+                        continue
+
+                    src_img_dir = os.path.join(ds_root, subset_path) if not os.path.isabs(subset_path) else subset_path
+                    if not os.path.exists(src_img_dir):
+                        continue
+
+                    # 创建对应的目标目录
+                    dst_img_dir = os.path.join(output_root, "images", subset)
+                    dst_lbl_dir = os.path.join(output_root, "labels", subset)
+                    os.makedirs(dst_img_dir, exist_ok=True)
+                    os.makedirs(dst_lbl_dir, exist_ok=True)
+
+                    count = 0
                     for img_name in os.listdir(src_img_dir):
                         if img_name.lower().endswith(('.jpg', '.png', '.jpeg')):
-                            # 复制图片
-                            src_img = os.path.join(src_img_dir, img_name)
-                            # 为了防止重名，添加数据集索引前缀
+                            # 复制图片 (添加前缀防止冲突)
+                            src_img_path = os.path.join(src_img_dir, img_name)
                             new_img_name = f"ds{idx}_{img_name}"
-                            dst_img = os.path.join(merged_images_dir, "train", new_img_name)
-                            shutil.copy2(src_img, dst_img)
+                            dst_img_path = os.path.join(dst_img_dir, new_img_name)
+                            shutil.copy2(src_img_path, dst_img_path)
                             
-                            # 处理对应的 label
+                            # 处理标签
                             label_name = os.path.splitext(img_name)[0] + ".txt"
-                            # 寻找 label 目录
-                            src_label_dir = src_img_dir.replace("images", "labels")
-                            src_label = os.path.join(src_label_dir, label_name)
+                            # 假设标准 YOLO 结构: images -> labels
+                            src_lbl_dir = src_img_dir.replace("images", "labels")
+                            src_lbl_path = os.path.join(src_lbl_dir, label_name)
                             
-                            if os.path.exists(src_label):
-                                dst_label = os.path.join(merged_labels_dir, "train", os.path.splitext(new_img_name)[0] + ".txt")
-                                # 读取并偏移 ID
-                                with open(src_label, 'r') as lf:
+                            if os.path.exists(src_lbl_path):
+                                dst_lbl_path = os.path.join(dst_lbl_dir, os.path.splitext(new_img_name)[0] + ".txt")
+                                with open(src_lbl_path, 'r', encoding='utf-8') as lf:
                                     lines = lf.readlines()
                                 
                                 new_lines = []
@@ -151,28 +187,45 @@ class DatasetMergerTab(tk.Frame):
                                         new_id = old_id + id_offset
                                         new_lines.append(f"{new_id} {' '.join(parts[1:])}\n")
                                 
-                                with open(dst_label, 'w') as nlf:
+                                with open(dst_lbl_path, 'w', encoding='utf-8') as nlf:
                                     nlf.writelines(new_lines)
+                            count += 1
+                    
+                    if count > 0:
+                        self.log(f"  - 子集 '{subset}': 已合并 {count} 张图片")
 
-                all_names.extend(names)
+                merged_names.extend(names)
                 id_offset += len(names)
 
-            # 生成新的 data.yaml
+            # 4. 生成新的 data.yaml
             new_yaml_data = {
-                'path': output_root,
+                'path': os.path.abspath(output_root),
                 'train': 'images/train',
-                'val': 'images/train', # 简化，默认全用
-                'names': {i: name for i, name in enumerate(all_names)}
+                'val': 'images/val',
+                'test': 'images/test',
+                'names': {i: name for i, name in enumerate(merged_names)}
             }
             
+            # 清理不存在的路径
+            for key in ['val', 'test']:
+                if not os.path.exists(os.path.join(output_root, "images", key)):
+                    del new_yaml_data[key]
+
             with open(os.path.join(output_root, "data.yaml"), 'w', encoding='utf-8') as f:
-                yaml.dump(new_yaml_data, f, allow_unicode=True)
+                yaml.dump(new_yaml_data, f, allow_unicode=True, sort_keys=False)
 
             self.log(f"✅ 合并成功！")
             self.log(f"输出目录: {output_root}")
-            self.log(f"总类别数: {len(all_names)}")
+            self.log(f"总类别数: {len(merged_names)}")
             self.status_label.config(text="合并成功", fg="green")
-            messagebox.showinfo("成功", f"数据集已合并至:\n{output_root}\n\n您可以直接使用该目录下的 data.yaml 进行新模型的训练。")
+            messagebox.showinfo("成功", f"数据集已合并至:\n{output_root}")
+
+        except Exception as e:
+            self.log(f"❌ 出错: {str(e)}")
+            import traceback
+            self.log(traceback.format_exc())
+            messagebox.showerror("错误", f"合并过程中出错: {str(e)}")
+            self.status_label.config(text="合并失败", fg="red")
 
         except Exception as e:
             self.log(f"❌ 出错: {str(e)}")
