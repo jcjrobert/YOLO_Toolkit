@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+
+# 项目产生的数据和模型
+dataset/
+project/
+models/
+logs/
+inference_results/
+
+# 配置文件（本地开发可能包含绝对路径，通常不提交）
+config.json
+
+# YOLO 默认产生的 runs 目录
+runs/
+
+# 预训练权重
+*.pt
