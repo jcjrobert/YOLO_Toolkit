@@ -78,9 +78,13 @@ class ModelTrainTab(tk.Frame):
         self.workers = tk.StringVar(value=str(self.config_manager.get("yolo_train", "workers")))
         tk.Entry(params_frame, textvariable=self.workers, width=10).grid(row=1, column=3, padx=5, pady=5)
 
+        tk.Label(params_frame, text="保存间隔 (Save Period):").grid(row=2, column=0, sticky="e")
+        self.save_period = tk.StringVar(value=str(self.config_manager.get("yolo_train", "save_period") or 50))
+        tk.Entry(params_frame, textvariable=self.save_period, width=10).grid(row=2, column=1, padx=5, pady=5)
+
         # 恢复训练勾选框
         self.resume_train = tk.BooleanVar(value=False)
-        tk.Checkbutton(params_frame, text="恢复训练 (从 last.pt 断点续跑)", variable=self.resume_train).grid(row=2, column=0, columnspan=2, sticky="w", padx=5, pady=5)
+        tk.Checkbutton(params_frame, text="恢复训练 (从 last.pt 断点续跑)", variable=self.resume_train).grid(row=2, column=2, columnspan=2, sticky="w", padx=5, pady=5)
 
         # 4. 控制区域
         ctrl_frame = tk.Frame(top_frame)
@@ -153,6 +157,7 @@ class ModelTrainTab(tk.Frame):
         self.config_manager.set("yolo_train", "batch", int(self.batch.get()))
         self.config_manager.set("yolo_train", "device", self.device.get())
         self.config_manager.set("yolo_train", "workers", int(self.workers.get()))
+        self.config_manager.set("yolo_train", "save_period", int(self.save_period.get()))
 
         self.start_btn.config(state="disabled", text="训练中...")
         self.log_text.delete(1.0, tk.END)
@@ -225,6 +230,7 @@ class ModelTrainTab(tk.Frame):
                 "batch": int(self.batch.get()),
                 "workers": int(self.workers.get()),
                 "device": self.device.get(),
+                "save_period": int(self.save_period.get()),
                 "amp": True,
                 "exist_ok": True
             }
@@ -232,10 +238,10 @@ class ModelTrainTab(tk.Frame):
             if is_resume:
                 # 恢复模式下只传 resume=True，其他参数通常从 last.pt 对应的 args.yaml 加载
                 # 但允许通过命令行覆盖部分参数
-                model.train(resume=True)
+                results = model.train(resume=True)
             else:
                 # 普通模式
-                model.train(
+                results = model.train(
                     project=project_root,
                     name=project_dir_name,
                     **train_args
@@ -243,6 +249,12 @@ class ModelTrainTab(tk.Frame):
             
             # 4. 后处理：模型复制与归档
             self.status_label.config(text="状态: 归档模型中...", fg="blue")
+            
+            # 优先从 results 对象中获取实际保存路径
+            if results and hasattr(results, 'save_dir'):
+                save_dir = str(results.save_dir)
+                print(f"检测到实际保存目录: {save_dir}")
+            
             best_model_path = os.path.join(save_dir, "weights", "best.pt")
             
             if os.path.exists(best_model_path):
